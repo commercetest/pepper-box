@@ -4,12 +4,13 @@ package com.gslab.pepper.sampler;
 import com.eclipsesource.json.*;
 import com.gslab.pepper.util.ProducerKeys;
 import com.gslab.pepper.util.PropsKeys;
-import kafka.cluster.Broker;
 import org.apache.jmeter.config.Arguments;
 import org.apache.jmeter.protocol.java.sampler.AbstractJavaSamplerClient;
 import org.apache.jmeter.protocol.java.sampler.JavaSamplerContext;
 import org.apache.jmeter.samplers.SampleResult;
 import org.apache.jmeter.threads.JMeterContextService;
+import org.apache.jmeter.threads.JMeterVariables;
+import org.apache.jmeter.util.JMeterUtils;
 import org.apache.jorphan.logging.LoggingManager;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -35,6 +36,7 @@ import java.util.Properties;
  */
 public class PepperBoxKafkaSampler extends AbstractJavaSamplerClient {
 
+    public static final String GENERATE_PER_THREAD_TOPICS = "generate.per-thread.topics";
     //kafka producer
     private KafkaProducer<String, Object> producer;
 
@@ -55,6 +57,10 @@ public class PepperBoxKafkaSampler extends AbstractJavaSamplerClient {
     public Arguments getDefaultParameters() {
 
         Arguments defaultParameters = new Arguments();
+
+        log.info(String.format("Threads num %d, total %d",
+                JMeterContextService.getNumberOfThreads(), JMeterContextService.getTotalThreads()));
+
         defaultParameters.addArgument(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, ProducerKeys.BOOTSTRAP_SERVERS_CONFIG_DEFAULT);
         defaultParameters.addArgument(ProducerKeys.ZOOKEEPER_SERVERS, ProducerKeys.ZOOKEEPER_SERVERS_DEFAULT);
         defaultParameters.addArgument(ProducerKeys.KAFKA_TOPIC_CONFIG, ProducerKeys.KAFKA_TOPIC_CONFIG_DEFAULT);
@@ -65,15 +71,23 @@ public class PepperBoxKafkaSampler extends AbstractJavaSamplerClient {
         defaultParameters.addArgument(ProducerConfig.LINGER_MS_CONFIG, ProducerKeys.LINGER_MS_CONFIG_DEFAULT);
         defaultParameters.addArgument(ProducerConfig.BUFFER_MEMORY_CONFIG, ProducerKeys.BUFFER_MEMORY_CONFIG_DEFAULT);
         defaultParameters.addArgument(ProducerConfig.ACKS_CONFIG, ProducerKeys.ACKS_CONFIG_DEFAULT);
+        defaultParameters.addArgument(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION,"5");
+        defaultParameters.addArgument(ProducerConfig.RETRIES_CONFIG, "0");
         defaultParameters.addArgument(ProducerConfig.SEND_BUFFER_CONFIG, ProducerKeys.SEND_BUFFER_CONFIG_DEFAULT);
         defaultParameters.addArgument(ProducerConfig.RECEIVE_BUFFER_CONFIG, ProducerKeys.RECEIVE_BUFFER_CONFIG_DEFAULT);
         defaultParameters.addArgument(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, SecurityProtocol.PLAINTEXT.name);
         defaultParameters.addArgument(PropsKeys.MESSAGE_PLACEHOLDER_KEY, PropsKeys.MSG_PLACEHOLDER);
-        defaultParameters.addArgument(ProducerKeys.KERBEROS_ENABLED, ProducerKeys.KERBEROS_ENABLED_DEFULAT);
+        defaultParameters.addArgument(ProducerKeys.KERBEROS_ENABLED, ProducerKeys.KERBEROS_ENABLED_DEFAULT);
         defaultParameters.addArgument(ProducerKeys.JAVA_SEC_AUTH_LOGIN_CONFIG, ProducerKeys.JAVA_SEC_AUTH_LOGIN_CONFIG_DEFAULT);
         defaultParameters.addArgument(ProducerKeys.JAVA_SEC_KRB5_CONFIG, ProducerKeys.JAVA_SEC_KRB5_CONFIG_DEFAULT);
         defaultParameters.addArgument(ProducerKeys.SASL_KERBEROS_SERVICE_NAME, ProducerKeys.SASL_KERBEROS_SERVICE_NAME_DEFAULT);
         defaultParameters.addArgument(ProducerKeys.SASL_MECHANISM, ProducerKeys.SASL_MECHANISM_DEFAULT);
+        defaultParameters.addArgument(ProducerKeys.SASL_JAAS_CONFIG, ProducerKeys.SASL_JAAS_CONFIG_DEFAULT);
+        defaultParameters.addArgument(ProducerKeys.SSL_ENABLED_PROTOCOLS, ProducerKeys.SSL_ENABLED_PROTOCOLS_DEFAULT);
+        defaultParameters.addArgument(ProducerKeys.SSL_TRUSTSTORE_LOCATION, ProducerKeys.SSL_TRUSTSTORE_LOCATION_DEFAULT);
+        defaultParameters.addArgument(ProducerKeys.SSL_TRUSTSTORE_PASSWORD, ProducerKeys.SSL_TRUSTSTORE_PASSWORD_DEFAULT);
+        defaultParameters.addArgument(ProducerKeys.SSL_TRUSTSTORE_TYPE, ProducerKeys.SSL_TRUSTSTORE_TYPE_DEFAULT);
+        defaultParameters.addArgument(GENERATE_PER_THREAD_TOPICS, "NO");
         return defaultParameters;
     }
 
@@ -85,12 +99,22 @@ public class PepperBoxKafkaSampler extends AbstractJavaSamplerClient {
     @Override
     public void setupTest(JavaSamplerContext context) {
 
+        try {
+            JMeterVariables jMeterVariables = new JMeterVariables();
+            log.info("zk = " + JMeterContextService.getContext().getVariables().get("zookeepers"));
+            log.info("vars(\"zookeepers\":" +jMeterVariables.get("zookeepers"));
+        } catch (Exception e) {
+            log.error("Can't get the jmeter vars", e);
+        }
         Properties props = new Properties();
 
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, getBrokerServers(context));
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, context.getParameter(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG));
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, context.getParameter(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
         props.put(ProducerConfig.ACKS_CONFIG, context.getParameter(ProducerConfig.ACKS_CONFIG));
+        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION,
+                context.getParameter(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION));
+        props.put(ProducerConfig.RETRIES_CONFIG, context.getParameter(ProducerConfig.RETRIES_CONFIG));
         props.put(ProducerConfig.SEND_BUFFER_CONFIG, context.getParameter(ProducerConfig.SEND_BUFFER_CONFIG));
         props.put(ProducerConfig.RECEIVE_BUFFER_CONFIG, context.getParameter(ProducerConfig.RECEIVE_BUFFER_CONFIG));
         props.put(ProducerConfig.BATCH_SIZE_CONFIG, context.getParameter(ProducerConfig.BATCH_SIZE_CONFIG));
@@ -100,14 +124,29 @@ public class PepperBoxKafkaSampler extends AbstractJavaSamplerClient {
         props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, context.getParameter(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
         props.put(ProducerKeys.SASL_MECHANISM, context.getParameter(ProducerKeys.SASL_MECHANISM));
 
+        final String security_protocol = context.getParameter(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG);
+        log.info("security_protocol set to[" + security_protocol + "], comparing to [" + SecurityProtocol.SASL_SSL.name +"].");
+        if (security_protocol.equals(SecurityProtocol.SASL_SSL.name)) {
+            log.info("Adding SASL_SSL parameters for Kafka to use.");
+            props.put(ProducerKeys.SASL_JAAS_CONFIG, context.getParameter(ProducerKeys.SASL_JAAS_CONFIG));
+            props.put(ProducerKeys.SASL_MECHANISM, context.getParameter(ProducerKeys.SASL_MECHANISM));
+
+            props.put(ProducerKeys.SSL_ENABLED_PROTOCOLS, context.getParameter(ProducerKeys.SSL_ENABLED_PROTOCOLS));
+            props.put(ProducerKeys.SSL_TRUSTSTORE_LOCATION, context.getParameter(ProducerKeys.SSL_TRUSTSTORE_LOCATION));
+            props.put(ProducerKeys.SSL_TRUSTSTORE_PASSWORD, context.getParameter(ProducerKeys.SSL_TRUSTSTORE_PASSWORD));
+            props.put(ProducerKeys.SSL_TRUSTSTORE_TYPE, context.getParameter(ProducerKeys.SSL_TRUSTSTORE_TYPE));
+        }
+
         Iterator<String> parameters = context.getParameterNamesIterator();
         parameters.forEachRemaining(parameter -> {
             if (parameter.startsWith("_")) {
+                log.info("Adding: " + parameter);
                 props.put(parameter.substring(1), context.getParameter(parameter));
             }
         });
         String kerberosEnabled = context.getParameter(ProducerKeys.KERBEROS_ENABLED);
         if (kerberosEnabled != null && kerberosEnabled.equals(ProducerKeys.FLAG_YES)) {
+            log.info("Adding the Kerberos related parameters.");
             System.setProperty(ProducerKeys.JAVA_SEC_AUTH_LOGIN_CONFIG, context.getParameter(ProducerKeys.JAVA_SEC_AUTH_LOGIN_CONFIG));
             System.setProperty(ProducerKeys.JAVA_SEC_KRB5_CONFIG, context.getParameter(ProducerKeys.JAVA_SEC_KRB5_CONFIG));
             props.put(ProducerKeys.SASL_KERBEROS_SERVICE_NAME, context.getParameter(ProducerKeys.SASL_KERBEROS_SERVICE_NAME));
@@ -115,6 +154,20 @@ public class PepperBoxKafkaSampler extends AbstractJavaSamplerClient {
 
         placeHolder = context.getParameter(PropsKeys.MESSAGE_PLACEHOLDER_KEY);
         topic = context.getParameter(ProducerKeys.KAFKA_TOPIC_CONFIG);
+
+        System.setProperty("A", topic);  // Seems to work but I can't find how to use it elsewhere.
+        try {
+            JMeterUtils.setProperty("B", topic);
+            log.info("Set Properties System.setProperty A and B to topic: " + topic);
+        } catch (NullPointerException npe) {
+            // This catch is needed otherwise the tests fail with the NPE
+            log.error("couldn't find JMeterUtils.");
+        }
+
+        if (context.getParameter(GENERATE_PER_THREAD_TOPICS).equalsIgnoreCase("YES")) {
+            topic = topic + "." + JMeterContextService.getContext().getThreadNum();
+            log.info("Using custom Topic: " + topic);
+        }
         producer = new KafkaProducer<String, Object>(props);
 
     }
@@ -134,7 +187,6 @@ public class PepperBoxKafkaSampler extends AbstractJavaSamplerClient {
         Object message = JMeterContextService.getContext().getVariables().getObject(placeHolder);
 
         try {
-
             ProducerRecord<String, Object> producerRecord = new ProducerRecord<String, Object>(topic, message);
             producer.send(producerRecord);
             sampleResult.setResponseData(message.toString(), StandardCharsets.UTF_8.name());
@@ -173,39 +225,30 @@ public class PepperBoxKafkaSampler extends AbstractJavaSamplerClient {
                 for (String id : ids) {
 
                     String brokerInfo = new String(zk.getData(PropsKeys.BROKER_IDS_ZK_PATH + "/" + id, false, null));
+                    log.info("Broker Info from zk: " + brokerInfo);
+
                     JsonObject jsonObject = Json.parse(brokerInfo).asObject();
 
                     String brokerHost = jsonObject.getString(PropsKeys.HOST, "");
                     int brokerPort = jsonObject.getInt(PropsKeys.PORT, -1);
 
                     if (!brokerHost.isEmpty() && brokerPort != -1) {
-
                         kafkaBrokers.append(brokerHost);
                         kafkaBrokers.append(":");
                         kafkaBrokers.append(brokerPort);
                         kafkaBrokers.append(",");
-
                     }
-
                 }
-            } catch (IOException | KeeperException | InterruptedException e) {
-
+            } catch (IOException | KeeperException | InterruptedException | UnsupportedOperationException e) {
                 log.error("Failed to get broker information", e);
-
             }
-
         }
 
         if (kafkaBrokers.length() > 0) {
-
             kafkaBrokers.setLength(kafkaBrokers.length() - 1);
-
             return kafkaBrokers.toString();
-
         } else {
-
             return  context.getParameter(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG);
-
         }
     }
 }
